@@ -69,7 +69,7 @@ bucket_policy_only = true
 ### Running the app
 ```
 cd crucible-tem-upload-ui
-uv python run main.py
+uv run python main.py
 ```
 
 ### Additional Details
