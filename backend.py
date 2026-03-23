@@ -279,3 +279,5 @@ def upload(
             msg = f'Crucible upload failed for {file} with error {e}'
             logger.error(msg)
             raise Exception(msg)
+
+    return session_id

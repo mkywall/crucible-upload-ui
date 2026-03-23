@@ -16,7 +16,7 @@ logging.basicConfig(level=logging.INFO, format="%(levelname)s:%(name)s:%(funcNam
 
 app = Flask(__name__)
 
-INSTRUMENTS = ["titanx", "themis", "team1", "spectre", "team05"] # you can add your instrument here
+INSTRUMENTS = ["titanx", "themis", "team1",  "team05"] # you can add your instrument here
 # Tkinter must run on the main thread. Flask runs in a background thread.
 # We use two queues to hand off dialog requests/results between threads.
 _tk_root = tk.Tk()
@@ -102,7 +102,7 @@ def do_upload():
     if missing:
         return jsonify({"error": f"Missing fields: {', '.join(missing)}"}), 400
     try:
-        success = backend.upload(
+        session_dsid = backend.upload(
             orcid=data["orcid"].strip(),
             project_id=data["project_id"].strip(),
             instrument_name=data["instrument_name"].strip(),
@@ -112,9 +112,9 @@ def do_upload():
         )
     except Exception as e:
         return jsonify({"error": str(e)}), 500
-    if success is False:
+    if not session_dsid:
         return jsonify({"error": "Upload failed — check server logs"}), 500
-    return jsonify({"ok": True})
+    return jsonify({"ok": True, "session_dsid": session_dsid, "project_id": data["project_id"].strip()})
 
 
 if __name__ == "__main__":

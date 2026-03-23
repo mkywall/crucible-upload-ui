@@ -153,6 +153,30 @@
 
   </div>
 
+  <!-- Success Modal -->
+  <div class="modal fade" id="success-modal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered">
+      <div class="modal-content">
+        <div class="modal-header bg-success text-white">
+          <h5 class="modal-title">Upload Successful!</h5>
+          <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body text-center">
+          <p>
+            View your data in
+            <a id="crucible-link" href="#" target="_blank">Crucible</a>
+            or scan the QR code below into the Crucible Lens Android App.
+          </p>
+          <div id="qr-code" class="d-inline-block mt-2"></div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
   <script>
     // -------------------------------------------------------------------------
     // State
@@ -352,13 +376,31 @@
         });
         const data = await res.json();
         if (!res.ok) { showStatus(data.error, "danger"); return; }
-        showStatus("Upload complete!", "success");
+        showSuccessModal(data.session_dsid, data.project_id);
       } catch (e) {
         showStatus("Upload error: " + e.message, "danger");
       } finally {
         setSpinner("upload", false);
         document.getElementById("btn-upload").disabled = false;
       }
+    }
+
+    // -------------------------------------------------------------------------
+    // Success modal with QR code
+    // -------------------------------------------------------------------------
+    function showSuccessModal(sessionDsid, projectId) {
+      const baseUrl = "https://crucible-graph-explorer-776258882599.us-central1.run.app";
+      document.getElementById("crucible-link").href = baseUrl + "/" + projectId;
+
+      const qrContainer = document.getElementById("qr-code");
+      qrContainer.innerHTML = "";
+      new QRCode(qrContainer, {
+        text: sessionDsid,
+        width: 200,
+        height: 200,
+      });
+
+      new bootstrap.Modal(document.getElementById("success-modal")).show();
     }
 
     // -------------------------------------------------------------------------
