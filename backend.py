@@ -169,7 +169,7 @@ def identify_session_files(session_folder_path: str) -> list[str]:
 def copy_all_files_to_gdrive(session_folder_path: str, instrument_name: str) -> None:
     p = Path(session_folder_path)
     relative_folder_path = p.relative_to(p.anchor).as_posix()
-    dest = f"{instrument_name}-drive:/crucible-uploads/{instrument_name}/{relative_folder_path}"
+    dest = f"{instrument_name}-gdrive:/crucible-uploads/{instrument_name}/{relative_folder_path}"
     logger.info(f'Copying {session_folder_path} to {dest}')
     
     try:
