@@ -121,6 +121,11 @@
                       placeholder=""
                       readonly style="background:#e9ecef;"></textarea>
 
+            <button class="btn btn-outline-primary mt-3" onclick="printSampleBarcode()" id="btn-print-barcode">
+              <span id="spinner-print-barcode" class="spinner-border spinner-border-sm d-none me-2" role="status"></span>
+              Print Sample Barcode
+            </button>
+
           </div>
         </div>
       </div>
@@ -153,23 +158,37 @@
 
   </div>
 
-  <!-- Success Modal -->
-  <div class="modal fade" id="success-modal" tabindex="-1">
+  <!-- Upload Modal (progress + QR code) -->
+  <div class="modal fade" id="upload-modal" tabindex="-1" data-bs-backdrop="static" data-bs-keyboard="false">
     <div class="modal-dialog modal-dialog-centered">
       <div class="modal-content">
-        <div class="modal-header bg-success text-white">
-          <h5 class="modal-title">Upload Successful!</h5>
-          <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+        <div class="modal-header" id="upload-modal-header">
+          <h5 class="modal-title" id="upload-modal-title">Uploading...</h5>
         </div>
-        <div class="modal-body text-center">
-          <p>
-            View your data in
-            <a id="crucible-link" href="#" target="_blank">Crucible</a>
-            or scan the QR code below into the Crucible Lens Android App.
-          </p>
-          <div id="qr-code" class="d-inline-block mt-2"></div>
+        <div class="modal-body">
+          <!-- Progress section -->
+          <div id="progress-container">
+            <div class="d-flex justify-content-between mb-1">
+              <small id="progress-label" class="text-muted">Preparing...</small>
+              <small id="progress-pct" class="text-muted">0%</small>
+            </div>
+            <div class="progress" style="height: 1.25rem;">
+              <div id="progress-bar" class="progress-bar progress-bar-striped progress-bar-animated"
+                   role="progressbar" style="width: 0%;" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100">
+              </div>
+            </div>
+          </div>
+          <!-- QR code section (hidden until success) -->
+          <div id="qr-section" class="text-center mt-4 d-none">
+            <p>
+              View your data in
+              <a id="crucible-link" href="#" target="_blank">Crucible</a>
+              or scan the QR code below.
+            </p>
+            <div id="qr-code" class="d-inline-block"></div>
+          </div>
         </div>
-        <div class="modal-footer">
+        <div class="modal-footer d-none" id="upload-modal-footer">
           <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
         </div>
       </div>
@@ -323,6 +342,32 @@
     });
 
     // -------------------------------------------------------------------------
+    // Print Sample Barcode
+    // -------------------------------------------------------------------------
+    async function printSampleBarcode() {
+      const sampleUid = document.getElementById("sample-uid").value.trim();
+      if (!sampleUid) { showStatus("No sample selected — look up a sample first.", "warning"); return; }
+
+      setSpinner("print-barcode", true);
+      clearStatus();
+
+      try {
+        const res = await fetch("/api/sample/print-barcode", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ sample_unique_id: sampleUid, sample_name: document.getElementById("sample-name").value.trim() }),
+        });
+        const data = await res.json();
+        if (!res.ok) { showStatus(data.error, "danger"); return; }
+        showStatus("Barcode sent to printer!", "success");
+      } catch (e) {
+        showStatus("Print barcode failed: " + e.message, "danger");
+      } finally {
+        setSpinner("print-barcode", false);
+      }
+    }
+
+    // -------------------------------------------------------------------------
     // Browse
     // -------------------------------------------------------------------------
     async function browseFolder() {
@@ -338,6 +383,30 @@
     // -------------------------------------------------------------------------
     // Upload
     // -------------------------------------------------------------------------
+    let uploadModal = null;
+
+    function setProgress(percent, label) {
+      const bar = document.getElementById("progress-bar");
+      bar.style.width = percent + "%";
+      bar.setAttribute("aria-valuenow", percent);
+      document.getElementById("progress-pct").textContent = percent + "%";
+      if (label) document.getElementById("progress-label").textContent = label;
+    }
+
+    function resetUploadModal() {
+      const bar = document.getElementById("progress-bar");
+      bar.style.width = "0%";
+      bar.classList.remove("bg-success", "bg-danger");
+      bar.classList.add("progress-bar-striped", "progress-bar-animated");
+      document.getElementById("progress-label").textContent = "Preparing...";
+      document.getElementById("progress-pct").textContent = "0%";
+      document.getElementById("upload-modal-title").textContent = "Uploading...";
+      document.getElementById("upload-modal-header").className = "modal-header";
+      document.getElementById("upload-modal-footer").classList.add("d-none");
+      document.getElementById("qr-section").classList.add("d-none");
+      document.getElementById("qr-code").innerHTML = "";
+    }
+
     async function doUpload() {
       const orcid = state.orcid;
       const project_id = document.getElementById("project").value;
@@ -345,7 +414,6 @@
       const session_folder_path = document.getElementById("session-folder").value.trim();
 
       const missing = [];
-
 
       if (!orcid) missing.push("email (look up user first)");
       if (!project_id) missing.push("project");
@@ -360,7 +428,16 @@
       setSpinner("upload", true);
       document.getElementById("btn-upload").disabled = true;
       clearStatus();
+      resetUploadModal();
 
+      // Show the modal
+      if (!uploadModal) {
+        uploadModal = new bootstrap.Modal(document.getElementById("upload-modal"));
+      }
+      uploadModal.show();
+      setProgress(0, "Starting upload...");
+
+      // POST with fetch, then read the SSE stream from the response body
       try {
         const res = await fetch("/api/upload", {
           method: "POST",
@@ -374,11 +451,52 @@
             comments: document.getElementById("comments").value.trim(),
           }),
         });
-        const data = await res.json();
-        if (!res.ok) { showStatus(data.error, "danger"); return; }
-        showSuccessModal(data.session_dsid, data.project_id);
+
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+
+          // Parse SSE messages from buffer
+          const parts = buffer.split("\n\n");
+          buffer = parts.pop(); // keep incomplete chunk
+          for (const part of parts) {
+            let eventType = "message";
+            let dataStr = "";
+            for (const line of part.split("\n")) {
+              if (line.startsWith("event: ")) eventType = line.slice(7);
+              else if (line.startsWith("data: ")) dataStr = line.slice(6);
+            }
+            if (!dataStr) continue;
+            const data = JSON.parse(dataStr);
+
+            if (eventType === "progress") {
+              setProgress(data.percent, data.message);
+            } else if (eventType === "complete") {
+              const bar = document.getElementById("progress-bar");
+              bar.classList.remove("progress-bar-striped", "progress-bar-animated");
+              bar.classList.add("bg-success");
+              setProgress(100, "Upload complete!");
+              showUploadSuccess(data.session_dsid, data.project_id);
+            } else if (eventType === "error") {
+              const bar = document.getElementById("progress-bar");
+              bar.classList.remove("progress-bar-striped", "progress-bar-animated");
+              bar.classList.add("bg-danger");
+              document.getElementById("progress-label").textContent = "Upload failed";
+              document.getElementById("upload-modal-title").textContent = "Upload Failed";
+              document.getElementById("upload-modal-header").classList.add("bg-danger", "text-white");
+              document.getElementById("upload-modal-footer").classList.remove("d-none");
+              showStatus(data.error, "danger");
+            }
+          }
+        }
       } catch (e) {
         showStatus("Upload error: " + e.message, "danger");
+        document.getElementById("upload-modal-footer").classList.remove("d-none");
       } finally {
         setSpinner("upload", false);
         document.getElementById("btn-upload").disabled = false;
@@ -386,21 +504,24 @@
     }
 
     // -------------------------------------------------------------------------
-    // Success modal with QR code
+    // Show success state in upload modal (QR code)
     // -------------------------------------------------------------------------
-    function showSuccessModal(sessionDsid, projectId) {
+    function showUploadSuccess(sessionDsid, projectId) {
       const baseUrl = "https://crucible-graph-explorer-776258882599.us-central1.run.app";
-      document.getElementById("crucible-link").href = baseUrl + "/" + projectId;
 
+      document.getElementById("upload-modal-title").textContent = "Upload Successful!";
+      document.getElementById("upload-modal-header").classList.add("bg-success", "text-white");
+      document.getElementById("upload-modal-footer").classList.remove("d-none");
+
+      document.getElementById("crucible-link").href = baseUrl + "/" + projectId;
       const qrContainer = document.getElementById("qr-code");
       qrContainer.innerHTML = "";
       new QRCode(qrContainer, {
         text: sessionDsid,
-        width: 200,
-        height: 200,
+        width: 256,
+        height: 256,
       });
-
-      new bootstrap.Modal(document.getElementById("success-modal")).show();
+      document.getElementById("qr-section").classList.remove("d-none");
     }
 
     // -------------------------------------------------------------------------

@@ -7,7 +7,9 @@ import threading
 import tkinter as tk
 from tkinter import filedialog
 
-from flask import Flask, jsonify, render_template, request
+from flask import Flask, Response, jsonify, render_template, request
+
+import json
 
 import backend
 from instrument_conf import DEFAULT_BROWSE_DIR
@@ -94,6 +96,20 @@ def sample_lookup():
     return jsonify(result)
 
 
+@app.post("/api/sample/print-barcode")
+def print_barcode():
+    data = request.json or {}
+    sample_unique_id = data.get("sample_unique_id", "").strip()
+    sample_name = data.get("sample_name", "").strip()
+    if not sample_unique_id:
+        return jsonify({"error": "Missing sample_unique_id"}), 400
+    try:
+        backend.print_sample_barcode(sample_unique_id, sample_name)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+    return jsonify({"ok": True})
+
+
 @app.post("/api/upload")
 def do_upload():
     data = request.json or {}
@@ -101,20 +117,82 @@ def do_upload():
     missing = [f for f in required if not data.get(f, "").strip()]
     if missing:
         return jsonify({"error": f"Missing fields: {', '.join(missing)}"}), 400
-    try:
-        session_dsid = backend.upload(
-            orcid=data["orcid"].strip(),
-            project_id=data["project_id"].strip(),
-            instrument_name=data["instrument_name"].strip(),
-            sample_unique_id=data.get("sample_unique_id", "").strip(),
-            session_folder_path=data["session_folder_path"].strip(),
-            comments=data.get("comments", "").strip(),
-        )
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-    if not session_dsid:
-        return jsonify({"error": "Upload failed — check server logs"}), 500
-    return jsonify({"ok": True, "session_dsid": session_dsid, "project_id": data["project_id"].strip()})
+
+    orcid = data["orcid"].strip()
+    project_id = data["project_id"].strip()
+    instrument_name = data["instrument_name"].strip()
+    sample_unique_id = data.get("sample_unique_id", "").strip()
+    session_folder_path = data["session_folder_path"].strip()
+    comments = data.get("comments", "").strip()
+    kw_list = []
+
+    def _sse(event, payload):
+        return f"event: {event}\ndata: {json.dumps(payload)}\n\n"
+
+    def generate():
+        try:
+            # Step 1: Validate path depth
+            from pathlib import Path
+            MIN_DEPTH = 3
+            parts = Path(session_folder_path).resolve().parts
+            if len(parts) - 1 < MIN_DEPTH:
+                yield _sse("error", {"error": f"Session folder is too close to the filesystem root. Please select a folder at least {MIN_DEPTH} levels deep."})
+                return
+
+            # Step 2: Copy to Google Drive
+            yield _sse("progress", {"step": "gdrive", "message": "Copying files to Google Drive...", "percent": 5})
+            try:
+                backend.copy_all_files_to_gdrive(session_folder_path, instrument_name)
+            except Exception as e:
+                backend.logger.error(e)
+
+            # Step 3: Identify session files
+            yield _sse("progress", {"step": "identify", "message": "Identifying session files...", "percent": 15})
+            session_files = backend.identify_session_files(session_folder_path)
+            total_files = len(session_files)
+
+            # Step 4: Create session dataset
+            yield _sse("progress", {"step": "session", "message": "Creating session in Crucible...", "percent": 20})
+            try:
+                session_name, session_id = backend.create_session(
+                    session_folder_path, kw_list, comments,
+                    orcid, project_id, instrument_name, sample_unique_id)
+            except Exception as e:
+                backend.logger.error(e)
+                yield _sse("error", {"error": f"Failed to create session: {e}"})
+                return
+
+            # Step 5: Process each file
+            if total_files == 0:
+                yield _sse("progress", {"step": "done", "message": "No data files found, session created.", "percent": 100})
+            else:
+                for i, file in enumerate(session_files):
+                    file_name = Path(file).name
+                    base_percent = 25
+                    file_percent = base_percent + int((i + 1) / total_files * 75)
+                    yield _sse("progress", {
+                        "step": "file",
+                        "message": f"Processing file {i + 1}/{total_files}: {file_name}",
+                        "percent": min(file_percent, 99),
+                        "current": i + 1,
+                        "total": total_files,
+                    })
+                    try:
+                        backend.process_each_file(
+                            file, instrument_name, project_id, orcid,
+                            session_name, session_id, sample_unique_id,
+                            kw_list, comments)
+                    except Exception as e:
+                        yield _sse("error", {"error": f"Failed on {file_name}: {e}"})
+                        return
+
+            yield _sse("complete", {"session_dsid": session_id, "project_id": project_id})
+
+        except Exception as e:
+            yield _sse("error", {"error": str(e)})
+
+    return Response(generate(), mimetype="text/event-stream",
+                    headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 
 if __name__ == "__main__":
