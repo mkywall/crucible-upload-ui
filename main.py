@@ -108,11 +108,15 @@ def print_barcode():
     sample_unique_id = data.get("sample_unique_id", "").strip()
     sample_name = data.get("sample_name", "").strip()
     if not sample_unique_id:
+        backend.logger.error("Missing sample_unique_id")
         return jsonify({"error": "Missing sample_unique_id"}), 400
     try:
         backend.print_sample_barcode(sample_unique_id, sample_name)
+        backend.logger.info(f"Printed barcode for sample '{sample_name}' with unique ID '{sample_unique_id}'")
     except Exception as e:
+        backend.logger.error(e)
         return jsonify({"error": str(e)}), 500
+    
     return jsonify({"ok": True})
 
 
