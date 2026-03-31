@@ -12,7 +12,7 @@ from flask import Flask, Response, jsonify, render_template, request
 import json
 
 import backend
-from instrument_conf import DEFAULT_BROWSE_DIR, IS_SESSION, DEFAULT_INSTRUMENT_NAME
+from instrument_conf import DEFAULT_BROWSE_DIR, IS_SESSION, DEFAULT_INSTRUMENT_NAME, PRINT_BARCODE_ENABLED
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s:%(name)s:%(funcName)s: %(message)s")
 
@@ -51,7 +51,7 @@ def _check_browse_queue():
 
 @app.get("/")
 def index():
-    return render_template("index.html")
+    return render_template("index.html", print_barcode_enabled=PRINT_BARCODE_ENABLED)
 
 
 @app.get("/api/instruments")
