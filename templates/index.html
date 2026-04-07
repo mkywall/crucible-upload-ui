@@ -121,10 +121,12 @@
                       placeholder=""
                       readonly style="background:#e9ecef;"></textarea>
 
+            {% if print_barcode_enabled %}
             <button class="btn btn-outline-primary mt-3" onclick="printSampleBarcode()" id="btn-print-barcode">
               <span id="spinner-print-barcode" class="spinner-border spinner-border-sm d-none me-2" role="status"></span>
               Print Sample Barcode
             </button>
+            {% endif %}
 
           </div>
         </div>

@@ -12,7 +12,7 @@ from flask import Flask, Response, jsonify, render_template, request
 import json
 
 import backend
-from instrument_conf import DEFAULT_BROWSE_DIR, IS_SESSION, DEFAULT_INSTRUMENT_NAME
+from instrument_conf import DEFAULT_BROWSE_DIR, IS_SESSION, DEFAULT_INSTRUMENT_NAME, PRINT_BARCODE_ENABLED
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s:%(name)s:%(funcName)s: %(message)s")
 
@@ -51,7 +51,7 @@ def _check_browse_queue():
 
 @app.get("/")
 def index():
-    return render_template("index.html")
+    return render_template("index.html", print_barcode_enabled=PRINT_BARCODE_ENABLED)
 
 
 @app.get("/api/instruments")
@@ -108,11 +108,15 @@ def print_barcode():
     sample_unique_id = data.get("sample_unique_id", "").strip()
     sample_name = data.get("sample_name", "").strip()
     if not sample_unique_id:
+        backend.logger.error("Missing sample_unique_id")
         return jsonify({"error": "Missing sample_unique_id"}), 400
     try:
         backend.print_sample_barcode(sample_unique_id, sample_name)
+        backend.logger.info(f"Printed barcode for sample '{sample_name}' with unique ID '{sample_unique_id}'")
     except Exception as e:
+        backend.logger.error(e)
         return jsonify({"error": str(e)}), 500
+    
     return jsonify({"ok": True})
 
 

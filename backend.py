@@ -126,7 +126,15 @@ def lookup_sample(sample_name: str | None = None, sample_unique_id: str | None =
 
 
 def print_sample_barcode(sample_unique_id, sample_name):
-    pass
+    from image_print import make_qr, make_nirvana_image, print_label
+    # qr code
+    qr_img = make_qr(sample_unique_id)
+
+    # label image
+    make_nirvana_image(qr_img, [sample_name, sample_unique_id[0:13]], "batch.png")
+    print_label("Brother PT-D610BT", "batch.png")
+    return
+
 
 
 def get_emi_file_name(serfile: str) -> str:
