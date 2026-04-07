@@ -209,12 +209,15 @@ def upload_dataset(file: str, instrument_name: str, project_id: str, orcid: str,
                       kw_list: list[str] = [], comments: str = None) -> str:
     # copy the files to temp bucket
     cloud_files = copy_dataset_to_cloud(file, instrument_name)
-
+    if instrument_name == 'insitu_pl':
+        instrument_name_upload = None
+    else:
+        instrument_name_upload = instrument_name
     # create the dataset
     ds = BaseDataset(file_to_upload=cloud_files[0],
                      owner_orcid=orcid,
                      project_id=project_id,
-                     instrument_name=instrument_name,
+                     instrument_name=instrument_name_upload,
                      session_name=session_name)
 
     scimd = {'comments': comments}  # TODO: ADD CLAUDE API CALL
@@ -222,7 +225,10 @@ def upload_dataset(file: str, instrument_name: str, project_id: str, orcid: str,
 
     new_ds_dsid = new_ds['created_record']['unique_id']
     client.datasets.request_ingestion(new_ds_dsid, ingestion_class=None)
-
+    if instrument_name == 'insitu_pl':
+        import time
+        time.sleep(3)
+        client.datasets.request_insitu_spec_aggregation(new_ds_dsid)
     if session_dsid is not None:
         client.datasets.link_parent_child(parent_dataset_id=session_dsid, child_dataset_id=new_ds_dsid)
     if sample_unique_id is not None:
